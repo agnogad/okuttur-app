@@ -1,9 +1,13 @@
-name: Build Signed APK, AAB & Release
+name: Build Signed APK, AAB & GitHub Release
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
+
+# 🔐 KRİTİK FIX: 403 hatasını çözer
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -13,18 +17,18 @@ jobs:
       # 1. Checkout
       - uses: actions/checkout@v4
 
-      # 2. Clone React repo
+      # 2. React repo clone
       - name: Clone React project
         run: git clone https://github.com/agnogad/openlibtr-web.git app
 
-      # 3. Node
+      # 3. Node setup
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # 4. Build React (Vite)
-      - name: Install & Build
+      # 4. Build React (Vite -> dist)
+      - name: Install & Build React
         run: |
           cd app
           npm install
@@ -39,43 +43,43 @@ jobs:
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init okuttur com.okuttur.app --web-dir=www
 
-      # 6. Copy dist
+      # 6. Copy dist (Vite FIX)
       - name: Copy build output
         run: |
           mkdir -p mobile/www
           cp -r app/dist/* mobile/www/
 
-      # 7. Add Android
+      # 7. Add Android platform
       - name: Add Android
         run: |
           cd mobile
           npx cap add android
 
-      # 8. Sync
-      - name: Sync
+      # 8. Sync Capacitor
+      - name: Sync Capacitor
         run: |
           cd mobile
           npx cap sync
 
-      # 9. App Name
+      # 9. App name
       - name: Set App Name
         run: |
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' mobile/android/app/src/main/res/values/strings.xml
 
-      # 10. ICON prepare
+      # 10. Assets (icon fix)
       - name: Prepare assets
         run: |
           mkdir -p mobile/assets
           cp assets/icon.png mobile/assets/icon.png
 
-      # 11. ICON generate
+      # 11. Generate icons (NEW Capacitor Assets API)
       - name: Generate App Icons
         run: |
           cd mobile
           npm install @capacitor/assets
           npx capacitor-assets generate
 
-      # 12. Java 21
+      # 12. Java 21 (AGP 8 requirement)
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -87,7 +91,7 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > mobile/android/app/release.keystore
 
-      # 14. Gradle cache
+      # 14. Gradle cache (speed boost)
       - uses: actions/cache@v4
         with:
           path: |
@@ -95,8 +99,8 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}
 
-      # 15. Build RELEASE (SIGNED)
-      - name: Build Release APK & AAB
+      # 15. Build RELEASE APK + AAB (SIGNED)
+      - name: Build Release
         run: |
           cd mobile/android
           chmod +x gradlew
@@ -113,22 +117,27 @@ jobs:
             -PMYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
             -PMYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
 
-      # 16. Upload artifacts
+      # 16. Debug output (hata olursa görürsün)
+      - name: Debug APK output
+        run: |
+          ls -R mobile/android/app/build/outputs/
+
+      # 17. Upload artifacts (opsiyonel)
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
           path: |
-            mobile/android/app/build/outputs/apk/release/app-release.apk
-            mobile/android/app/build/outputs/bundle/release/app-release.aab
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/android/app/build/outputs/bundle/release/*.aab
 
-      # 17. GitHub Release
+      # 18. GitHub Release (FIXED)
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: Okuttur v${{ github.run_number }}
           files: |
-            mobile/android/app/build/outputs/apk/release/app-release.apk
-            mobile/android/app/build/outputs/bundle/release/app-release.aab
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/android/app/build/outputs/bundle/release/*.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
