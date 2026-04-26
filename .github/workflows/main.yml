@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Signed APK, AAB & Release
 
 on:
   workflow_dispatch:
@@ -6,98 +6,130 @@ on:
     branches: [ main ]
 
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Builder repo
-      - name: Checkout builder repo
-        uses: actions/checkout@v4
+      # 1. Checkout
+      - uses: actions/checkout@v4
 
-      # 2. React repo klonla
+      # 2. Clone React repo
       - name: Clone React project
-        run: |
-          git clone https://github.com/agnogad/openlibtr-web.git app
+        run: git clone https://github.com/agnogad/openlibtr-web.git app
 
       # 3. Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          
 
-      # 4. Install + Build
-      - name: Install dependencies & build
+      # 4. Build React (Vite)
+      - name: Install & Build
         run: |
           cd app
           npm install
           npm run build
 
-      # 5. Capacitor environment
-      - name: Setup Capacitor project
+      # 5. Capacitor setup
+      - name: Setup Capacitor
         run: |
           mkdir mobile
           cd mobile
-
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
+          npx cap init okuttur com.okuttur.app --web-dir=www
 
-          npx cap init openlibtr com.openlibtr.app --web-dir=www
-
-      # 6. Build output kopyala (dist FIX)
+      # 6. Copy dist
       - name: Copy build output
         run: |
           mkdir -p mobile/www
+          cp -r app/dist/* mobile/www/
 
-          if [ -d "app/dist" ]; then
-            cp -r app/dist/* mobile/www/
-          elif [ -d "app/build" ]; then
-            cp -r app/build/* mobile/www/
-          else
-            echo "❌ Build output not found!"
-            exit 1
-          fi
-
-      # 7. Android ekle
+      # 7. Add Android
       - name: Add Android
         run: |
           cd mobile
           npx cap add android
 
       # 8. Sync
-      - name: Sync Capacitor
+      - name: Sync
         run: |
           cd mobile
           npx cap sync
 
-      # 9. Java (Gradle için)
+      # 9. App Name ayarla
+      - name: Set App Name
+        run: |
+          sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' mobile/android/app/src/main/res/values/strings.xml
+
+      # 10. ICON üret
+      - name: Generate App Icons
+        run: |
+          cd mobile
+          npm install @capacitor/assets
+          npx capacitor-assets generate --icon ../assets/icon.png
+
+      # 11. Java 21
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      # 10. Android SDK cache (speedup)
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      # 12. Keystore decode
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > mobile/android/app/release.keystore
+
+      # 13. Signing config
+      - name: Configure signing
+        run: |
+          cat >> mobile/android/gradle.properties <<EOF
+          MYAPP_RELEASE_STORE_FILE=release.keystore
+          MYAPP_RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }}
+          MYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}
+          MYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      # 14. build.gradle patch
+      - name: Enable signing config
+        run: |
+          sed -i 's/buildTypes {/signingConfigs {\n        release {\n            storeFile file(MYAPP_RELEASE_STORE_FILE)\n            storePassword MYAPP_RELEASE_STORE_PASSWORD\n            keyAlias MYAPP_RELEASE_KEY_ALIAS\n            keyPassword MYAPP_RELEASE_KEY_PASSWORD\n        }\n    }\n\n    buildTypes {/' mobile/android/app/build.gradle
+
+          sed -i 's/release {/release {\n            signingConfig signingConfigs.release/' mobile/android/app/build.gradle
+
+      # 15. Gradle cache
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*') }}
-          restore-keys: |
-            gradle-${{ runner.os }}
+          key: gradle-${{ runner.os }}
 
-      # 11. APK build
-      - name: Build APK
+      # 16. Build release
+      - name: Build Release APK & AAB
         run: |
           cd mobile/android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease
+          ./gradlew bundleRelease
 
-      # 12. APK upload
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      # 17. Upload artifacts (opsiyonel)
+      - uses: actions/upload-artifact@v4
         with:
-          name: openlibtr-apk
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          name: release-files
+          path: |
+            mobile/android/app/build/outputs/apk/release/app-release.apk
+            mobile/android/app/build/outputs/bundle/release/app-release.aab
+
+      # 18. GitHub Release oluştur
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Okuttur v${{ github.run_number }}
+          files: |
+            mobile/android/app/build/outputs/apk/release/app-release.apk
+            mobile/android/app/build/outputs/bundle/release/app-release.aab
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
