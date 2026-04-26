@@ -63,7 +63,8 @@ jobs:
       # 9. App name
       - name: Set App Name
         run: |
-          sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' mobile/android/app/src/main/res/values/strings.xml
+          sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' \
+            mobile/android/app/src/main/res/values/strings.xml
 
       # 10. Assets (icon)
       - name: Prepare assets
@@ -71,7 +72,7 @@ jobs:
           mkdir -p mobile/assets
           cp assets/icon.png mobile/assets/icon.png
 
-      # 11. Generate icons (NEW Capacitor Assets)
+      # 11. Generate icons
       - name: Generate App Icons
         run: |
           cd mobile
@@ -90,28 +91,50 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > mobile/android/app/release.keystore
 
-      # 14. Inject SIGNING CONFIG (FIX unsigned APK)
+      # 14. ✅ Signing config — mevcut android bloğuna PATCH et (duplicate yok)
       - name: Inject Signing Config
         run: |
-          cat >> mobile/android/app/build.gradle <<'EOF'
+          GRADLE=mobile/android/app/build.gradle
 
-android {
-    signingConfigs {
-        release {
-            storeFile file("../app/release.keystore")
-            storePassword System.getenv("MYAPP_RELEASE_STORE_PASSWORD")
-            keyAlias System.getenv("MYAPP_RELEASE_KEY_ALIAS")
-            keyPassword System.getenv("MYAPP_RELEASE_KEY_PASSWORD")
-        }
-    }
+          # signingConfigs bloğunu buildTypes'tan önce ekle
+          sed -i '/buildTypes {/i \
+              signingConfigs {\
+                  release {\
+                      storeFile file("release.keystore")\
+                      storePassword System.getenv("MYAPP_RELEASE_STORE_PASSWORD")\
+                      keyAlias System.getenv("MYAPP_RELEASE_KEY_ALIAS")\
+                      keyPassword System.getenv("MYAPP_RELEASE_KEY_PASSWORD")\
+                  }\
+              }' "$GRADLE"
 
-    buildTypes {
-        release {
-            signingConfig signingConfigs.release
-        }
-    }
-}
-EOF
+          # release buildType içine signingConfig satırını ekle
+          sed -i '/buildTypes {/{n;/release {/{n;s/$/\n                    signingConfig signingConfigs.release/}}}'  "$GRADLE" || true
+
+          # Alternatif: release bloğunu bul ve signingConfig ekle
+          python3 - <<'PYEOF'
+          import re
+
+          path = "mobile/android/app/build.gradle"
+          with open(path, "r") as f:
+              content = f.read()
+
+          # release buildType bloğuna signingConfig ekle (yoksa)
+          if "signingConfig signingConfigs.release" not in content:
+              content = re.sub(
+                  r'(buildTypes\s*\{[^}]*release\s*\{)',
+                  r'\1\n                signingConfig signingConfigs.release',
+                  content,
+                  flags=re.DOTALL
+              )
+
+          with open(path, "w") as f:
+              f.write(content)
+
+          print("build.gradle patched successfully")
+          PYEOF
+
+          echo "=== Final build.gradle ==="
+          cat "$GRADLE"
 
       # 15. Gradle cache
       - uses: actions/cache@v4
@@ -119,26 +142,33 @@ EOF
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*') }}
 
-      # 16. Build RELEASE (SIGNED APK + AAB)
+      # 16. Build RELEASE (Signed APK + AAB)
       - name: Build Release
+        env:
+          MYAPP_RELEASE_STORE_FILE: app/release.keystore
+          MYAPP_RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          MYAPP_RELEASE_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          MYAPP_RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd mobile/android
           chmod +x gradlew
+          ./gradlew assembleRelease bundleRelease --stacktrace
 
-          MYAPP_RELEASE_STORE_FILE=app/release.keystore \
-          MYAPP_RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
-          MYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
-          MYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }} \
-          ./gradlew assembleRelease bundleRelease
+      # 17. APK imzalanmış mı doğrula
+      - name: Verify APK signature
+        run: |
+          APK=$(find mobile/android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          echo "APK: $APK"
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner verify --verbose "$APK" || true
 
-      # 17. Debug output
+      # 18. Debug outputs
       - name: Debug outputs
         run: |
           ls -R mobile/android/app/build/outputs/
 
-      # 18. Upload artifacts
+      # 19. Upload artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
@@ -146,7 +176,7 @@ EOF
             mobile/android/app/build/outputs/apk/release/*.apk
             mobile/android/app/build/outputs/bundle/release/*.aab
 
-      # 19. GitHub Release
+      # 20. GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
