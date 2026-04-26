@@ -5,7 +5,6 @@ on:
   push:
     branches: [ main ]
 
-# 🔐 KRİTİK FIX: 403 hatasını çözer
 permissions:
   contents: write
 
@@ -17,17 +16,17 @@ jobs:
       # 1. Checkout
       - uses: actions/checkout@v4
 
-      # 2. React repo clone
+      # 2. Clone React repo
       - name: Clone React project
         run: git clone https://github.com/agnogad/openlibtr-web.git app
 
-      # 3. Node setup
+      # 3. Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # 4. Build React (Vite -> dist)
+      # 4. Build React (Vite → dist)
       - name: Install & Build React
         run: |
           cd app
@@ -43,19 +42,19 @@ jobs:
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init okuttur com.okuttur.app --web-dir=www
 
-      # 6. Copy dist (Vite FIX)
+      # 6. Copy dist
       - name: Copy build output
         run: |
           mkdir -p mobile/www
           cp -r app/dist/* mobile/www/
 
-      # 7. Add Android platform
+      # 7. Android add
       - name: Add Android
         run: |
           cd mobile
           npx cap add android
 
-      # 8. Sync Capacitor
+      # 8. Sync
       - name: Sync Capacitor
         run: |
           cd mobile
@@ -66,20 +65,20 @@ jobs:
         run: |
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' mobile/android/app/src/main/res/values/strings.xml
 
-      # 10. Assets (icon fix)
+      # 10. Assets (icon)
       - name: Prepare assets
         run: |
           mkdir -p mobile/assets
           cp assets/icon.png mobile/assets/icon.png
 
-      # 11. Generate icons (NEW Capacitor Assets API)
+      # 11. Generate icons (NEW Capacitor Assets)
       - name: Generate App Icons
         run: |
           cd mobile
           npm install @capacitor/assets
           npx capacitor-assets generate
 
-      # 12. Java 21 (AGP 8 requirement)
+      # 12. Java 21
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -91,7 +90,30 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > mobile/android/app/release.keystore
 
-      # 14. Gradle cache (speed boost)
+      # 14. Inject SIGNING CONFIG (FIX unsigned APK)
+      - name: Inject Signing Config
+        run: |
+          cat >> mobile/android/app/build.gradle <<'EOF'
+
+android {
+    signingConfigs {
+        release {
+            storeFile file("../app/release.keystore")
+            storePassword System.getenv("MYAPP_RELEASE_STORE_PASSWORD")
+            keyAlias System.getenv("MYAPP_RELEASE_KEY_ALIAS")
+            keyPassword System.getenv("MYAPP_RELEASE_KEY_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+        }
+    }
+}
+EOF
+
+      # 15. Gradle cache
       - uses: actions/cache@v4
         with:
           path: |
@@ -99,30 +121,24 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}
 
-      # 15. Build RELEASE APK + AAB (SIGNED)
+      # 16. Build RELEASE (SIGNED APK + AAB)
       - name: Build Release
         run: |
           cd mobile/android
           chmod +x gradlew
 
-          ./gradlew assembleRelease \
-            -PMYAPP_RELEASE_STORE_FILE=app/release.keystore \
-            -PMYAPP_RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
-            -PMYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
-            -PMYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
+          MYAPP_RELEASE_STORE_FILE=app/release.keystore \
+          MYAPP_RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
+          MYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
+          MYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }} \
+          ./gradlew assembleRelease bundleRelease
 
-          ./gradlew bundleRelease \
-            -PMYAPP_RELEASE_STORE_FILE=app/release.keystore \
-            -PMYAPP_RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
-            -PMYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
-            -PMYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
-
-      # 16. Debug output (hata olursa görürsün)
-      - name: Debug APK output
+      # 17. Debug output
+      - name: Debug outputs
         run: |
           ls -R mobile/android/app/build/outputs/
 
-      # 17. Upload artifacts (opsiyonel)
+      # 18. Upload artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
@@ -130,7 +146,7 @@ jobs:
             mobile/android/app/build/outputs/apk/release/*.apk
             mobile/android/app/build/outputs/bundle/release/*.aab
 
-      # 18. GitHub Release (FIXED)
+      # 19. GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
