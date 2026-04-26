@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout builder repo
+      # 1. Checkout
       - uses: actions/checkout@v4
 
-      # 2. React repo klonla
+      # 2. Clone React repo
       - name: Clone React project
         run: git clone https://github.com/agnogad/openlibtr-web.git app
 
@@ -39,13 +39,13 @@ jobs:
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init okuttur com.okuttur.app --web-dir=www
 
-      # 6. Build output kopyala (dist FIX)
+      # 6. Copy dist
       - name: Copy build output
         run: |
           mkdir -p mobile/www
           cp -r app/dist/* mobile/www/
 
-      # 7. Android ekle
+      # 7. Add Android
       - name: Add Android
         run: |
           cd mobile
@@ -57,18 +57,18 @@ jobs:
           cd mobile
           npx cap sync
 
-      # 9. App Name ayarla
+      # 9. App Name
       - name: Set App Name
         run: |
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' mobile/android/app/src/main/res/values/strings.xml
 
-      # 10. ICON hazırlık (YENİ SİSTEM)
+      # 10. ICON prepare
       - name: Prepare assets
         run: |
           mkdir -p mobile/assets
           cp assets/icon.png mobile/assets/icon.png
 
-      # 11. ICON üret
+      # 11. ICON generate
       - name: Generate App Icons
         run: |
           cd mobile
@@ -82,29 +82,12 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      # 13. Keystore decode
+      # 13. Decode keystore
       - name: Decode keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > mobile/android/app/release.keystore
 
-      # 14. Signing config
-      - name: Configure signing
-        run: |
-          cat >> mobile/android/gradle.properties <<EOF
-          MYAPP_RELEASE_STORE_FILE=release.keystore
-          MYAPP_RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }}
-          MYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}
-          MYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
-          EOF
-
-      # 15. build.gradle patch
-      - name: Enable signing config
-        run: |
-          sed -i 's/buildTypes {/signingConfigs {\n        release {\n            storeFile file(MYAPP_RELEASE_STORE_FILE)\n            storePassword MYAPP_RELEASE_STORE_PASSWORD\n            keyAlias MYAPP_RELEASE_KEY_ALIAS\n            keyPassword MYAPP_RELEASE_KEY_PASSWORD\n        }\n    }\n\n    buildTypes {/' mobile/android/app/build.gradle
-
-          sed -i 's/release {/release {\n            signingConfig signingConfigs.release/' mobile/android/app/build.gradle
-
-      # 16. Gradle cache
+      # 14. Gradle cache
       - uses: actions/cache@v4
         with:
           path: |
@@ -112,15 +95,25 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}
 
-      # 17. Build RELEASE
+      # 15. Build RELEASE (SIGNED)
       - name: Build Release APK & AAB
         run: |
           cd mobile/android
           chmod +x gradlew
-          ./gradlew assembleRelease
-          ./gradlew bundleRelease
 
-      # 18. Upload artifact (opsiyonel)
+          ./gradlew assembleRelease \
+            -PMYAPP_RELEASE_STORE_FILE=app/release.keystore \
+            -PMYAPP_RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
+            -PMYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
+            -PMYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
+
+          ./gradlew bundleRelease \
+            -PMYAPP_RELEASE_STORE_FILE=app/release.keystore \
+            -PMYAPP_RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
+            -PMYAPP_RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
+            -PMYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
+
+      # 16. Upload artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
@@ -128,7 +121,7 @@ jobs:
             mobile/android/app/build/outputs/apk/release/app-release.apk
             mobile/android/app/build/outputs/bundle/release/app-release.aab
 
-      # 19. GitHub Release oluştur
+      # 17. GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
