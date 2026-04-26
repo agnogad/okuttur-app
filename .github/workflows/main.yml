@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Builder repo checkout
+      # 1. Builder repo
       - name: Checkout builder repo
         uses: actions/checkout@v4
 
@@ -19,60 +19,76 @@ jobs:
         run: |
           git clone https://github.com/agnogad/openlibtr-web.git app
 
-      # 3. Node setup
+      # 3. Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      # 4. Install deps + build
-      - name: Install & Build React
+      # 4. Install + Build
+      - name: Install dependencies & build
         run: |
           cd app
           npm install
           npm run build
 
-      # 5. Capacitor kur
-      - name: Install Capacitor
-        run: |
-          npm install -g @capacitor/cli
-
-      # 6. Capacitor init
-      - name: Init Capacitor
+      # 5. Capacitor environment
+      - name: Setup Capacitor project
         run: |
           mkdir mobile
           cd mobile
+
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-          npx cap init openlibtr com.openlibtr.app
+          npx cap init openlibtr com.openlibtr.app --web-dir=www
 
-      # 7. Build output kopyala
-      - name: Copy build files
+      # 6. Build output kopyala (dist FIX)
+      - name: Copy build output
         run: |
           mkdir -p mobile/www
-          cp -r app/build/* mobile/www/
 
-      # 8. Android ekle
-      - name: Add Android platform
+          if [ -d "app/dist" ]; then
+            cp -r app/dist/* mobile/www/
+          elif [ -d "app/build" ]; then
+            cp -r app/build/* mobile/www/
+          else
+            echo "❌ Build output not found!"
+            exit 1
+          fi
+
+      # 7. Android ekle
+      - name: Add Android
         run: |
           cd mobile
           npx cap add android
 
-      # 9. Sync
+      # 8. Sync
       - name: Sync Capacitor
         run: |
           cd mobile
           npx cap sync
 
-      # 10. Java setup
+      # 9. Java (Gradle için)
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      # 11. Gradle build (APK)
+      # 10. Android SDK cache (speedup)
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*') }}
+          restore-keys: |
+            gradle-${{ runner.os }}
+
+      # 11. APK build
       - name: Build APK
         run: |
           cd mobile/android
