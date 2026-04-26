@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout
+      # 1. Checkout builder repo
       - uses: actions/checkout@v4
 
-      # 2. Clone React repo
+      # 2. React repo klonla
       - name: Clone React project
         run: git clone https://github.com/agnogad/openlibtr-web.git app
 
@@ -39,13 +39,13 @@ jobs:
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap init okuttur com.okuttur.app --web-dir=www
 
-      # 6. Copy dist
+      # 6. Build output kopyala (dist FIX)
       - name: Copy build output
         run: |
           mkdir -p mobile/www
           cp -r app/dist/* mobile/www/
 
-      # 7. Add Android
+      # 7. Android ekle
       - name: Add Android
         run: |
           cd mobile
@@ -62,26 +62,32 @@ jobs:
         run: |
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' mobile/android/app/src/main/res/values/strings.xml
 
-      # 10. ICON üret
+      # 10. ICON hazırlık (YENİ SİSTEM)
+      - name: Prepare assets
+        run: |
+          mkdir -p mobile/assets
+          cp assets/icon.png mobile/assets/icon.png
+
+      # 11. ICON üret
       - name: Generate App Icons
         run: |
           cd mobile
           npm install @capacitor/assets
-          npx capacitor-assets generate --icon ../assets/icon.png
+          npx capacitor-assets generate
 
-      # 11. Java 21
+      # 12. Java 21
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      # 12. Keystore decode
+      # 13. Keystore decode
       - name: Decode keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > mobile/android/app/release.keystore
 
-      # 13. Signing config
+      # 14. Signing config
       - name: Configure signing
         run: |
           cat >> mobile/android/gradle.properties <<EOF
@@ -91,14 +97,14 @@ jobs:
           MYAPP_RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
           EOF
 
-      # 14. build.gradle patch
+      # 15. build.gradle patch
       - name: Enable signing config
         run: |
           sed -i 's/buildTypes {/signingConfigs {\n        release {\n            storeFile file(MYAPP_RELEASE_STORE_FILE)\n            storePassword MYAPP_RELEASE_STORE_PASSWORD\n            keyAlias MYAPP_RELEASE_KEY_ALIAS\n            keyPassword MYAPP_RELEASE_KEY_PASSWORD\n        }\n    }\n\n    buildTypes {/' mobile/android/app/build.gradle
 
           sed -i 's/release {/release {\n            signingConfig signingConfigs.release/' mobile/android/app/build.gradle
 
-      # 15. Gradle cache
+      # 16. Gradle cache
       - uses: actions/cache@v4
         with:
           path: |
@@ -106,7 +112,7 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}
 
-      # 16. Build release
+      # 17. Build RELEASE
       - name: Build Release APK & AAB
         run: |
           cd mobile/android
@@ -114,7 +120,7 @@ jobs:
           ./gradlew assembleRelease
           ./gradlew bundleRelease
 
-      # 17. Upload artifacts (opsiyonel)
+      # 18. Upload artifact (opsiyonel)
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
@@ -122,7 +128,7 @@ jobs:
             mobile/android/app/build/outputs/apk/release/app-release.apk
             mobile/android/app/build/outputs/bundle/release/app-release.aab
 
-      # 18. GitHub Release oluştur
+      # 19. GitHub Release oluştur
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
