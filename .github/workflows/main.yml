@@ -69,7 +69,7 @@ jobs:
       - name: Set StatusBar color (Android)
         run: |
           sed -i '/<resources>/a \
-            <color name="status_bar_color">#0f172a</color>' \
+            <color name="status_bar_color">#1c1b1f</color>' \
             mobile/android/app/src/main/res/values/colors.xml
 
           sed -i 's/<\/style>/    <item name="android:statusBarColor">@color\/status_bar_color<\/item>\n<\/style>/' \
