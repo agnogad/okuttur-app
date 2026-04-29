@@ -66,7 +66,7 @@ jobs:
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' \
             mobile/android/app/src/main/res/values/strings.xml
 
-      # 10. Status Bar Color
+     # 10. Status Bar Color
       - name: Configure Status Bar Color
         run: |
           python3 - <<'PYEOF'
@@ -77,16 +77,15 @@ jobs:
               content = f.read()
 
           color_items = (
-              '    <item name="android:statusBarColor">#1c1b1f</item>\n'
+              '\n    <item name="android:statusBarColor">#1c1b1f</item>\n'
               '    <item name="android:windowLightStatusBar">false</item>\n'
           )
 
-          if "statusBarColor" not in content:
-              content = re.sub(
-                  r'(<style name="AppTheme"[^>]*>)',
-                  r'\1\n' + color_items,
-                  content
-              )
+          # Her iki temaya da ekle
+          for theme in ['AppTheme"', 'AppTheme.NoActionBar"']:
+              pattern = r'(<style name="' + re.escape(theme) + r'[^>]*>)'
+              if f'android:statusBarColor' not in re.search(pattern + r'.*?</style>', content, re.DOTALL).group(0):
+                  content = re.sub(pattern, r'\1' + color_items, content)
 
           with open(path, "w") as f:
               f.write(content)
