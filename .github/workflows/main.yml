@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 22
 
-      # 4. Build React (Vite → dist)
+      # 4. Build React
       - name: Install & Build React
         run: |
           cd app
@@ -48,7 +48,7 @@ jobs:
           mkdir -p mobile/www
           cp -r app/dist/* mobile/www/
 
-      # 7. Android add
+      # 7. Add Android
       - name: Add Android
         run: |
           cd mobile
@@ -66,46 +66,57 @@ jobs:
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' \
             mobile/android/app/src/main/res/values/strings.xml
 
-      - name: Set StatusBar color (Android)
+      # 🔥 10. STATUS BAR FIX (YAML SAFE)
+      - name: Fix Status Bar Color
         run: |
-          sed -i '/<resources>/a \
-            <color name="status_bar_color">#1c1b1f</color>' \
-            mobile/android/app/src/main/res/values/colors.xml
+          VALUES_DIR=mobile/android/app/src/main/res/values
+          COLORS=$VALUES_DIR/colors.xml
+          STYLES=$VALUES_DIR/styles.xml
 
-          sed -i 's/<\/style>/    <item name="android:statusBarColor">@color\/status_bar_color<\/item>\n<\/style>/' \
-            mobile/android/app/src/main/res/values/styles.xml
+          mkdir -p $VALUES_DIR
 
-      # 10. Assets (icon)
+          # colors.xml oluştur (her zaman overwrite)
+          cat <<EOF > $COLORS
+          <resources>
+          <color name="status_bar_color">#1c1b1f</color>
+          </resources>
+          EOF
+
+          # styles.xml içine ekle (yoksa)
+          if ! grep -q "statusBarColor" $STYLES; then
+            sed -i '/<\/style>/i\    <item name="android:statusBarColor">@color/status_bar_color</item>' $STYLES
+          fi
+
+      # 11. Assets
       - name: Prepare assets
         run: |
           mkdir -p mobile/assets
           cp assets/icon.png mobile/assets/icon.png
 
-      # 11. Generate icons
+      # 12. Generate icons
       - name: Generate App Icons
         run: |
           cd mobile
           npm install @capacitor/assets
           npx capacitor-assets generate
 
-      # 12. Java 21
+      # 13. Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
-      # 13. Decode keystore
+      # 14. Decode keystore
       - name: Decode keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > mobile/android/app/release.keystore
 
-      # 14. ✅ Signing config — mevcut android bloğuna PATCH et (duplicate yok)
+      # 15. Signing config
       - name: Inject Signing Config
         run: |
           GRADLE=mobile/android/app/build.gradle
 
-          # signingConfigs bloğunu buildTypes'tan önce ekle
           sed -i '/buildTypes {/i \
               signingConfigs {\
                   release {\
@@ -116,68 +127,28 @@ jobs:
                   }\
               }' "$GRADLE"
 
-          # release buildType içine signingConfig satırını ekle
-          sed -i '/buildTypes {/{n;/release {/{n;s/$/\n                    signingConfig signingConfigs.release/}}}'  "$GRADLE" || true
-
-          # Alternatif: release bloğunu bul ve signingConfig ekle
           python3 - <<'PYEOF'
           import re
-
           path = "mobile/android/app/build.gradle"
-          with open(path, "r") as f:
-              content = f.read()
-
-          # release buildType bloğuna signingConfig ekle (yoksa)
-          if "signingConfig signingConfigs.release" not in content:
-              content = re.sub(
-                  r'(buildTypes\s*\{[^}]*release\s*\{)',
-                  r'\1\n                signingConfig signingConfigs.release',
-                  content,
-                  flags=re.DOTALL
-              )
-
-          with open(path, "w") as f:
-              f.write(content)
-
-          print("build.gradle patched successfully")
+          with open(path) as f:
+              c = f.read()
+          if "signingConfig signingConfigs.release" not in c:
+              c = re.sub(r'(release\s*\{)', r'\1\n                signingConfig signingConfigs.release', c)
+          open(path,"w").write(c)
           PYEOF
 
-          echo "=== Final build.gradle ==="
-          cat "$GRADLE"
-
-      # 15. Gradle cache
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*') }}
-
-      # 16. Build RELEASE (Signed APK + AAB)
+      # 16. Build
       - name: Build Release
         env:
-          MYAPP_RELEASE_STORE_FILE: app/release.keystore
           MYAPP_RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           MYAPP_RELEASE_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           MYAPP_RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd mobile/android
           chmod +x gradlew
-          ./gradlew assembleRelease bundleRelease --stacktrace
+          ./gradlew assembleRelease bundleRelease
 
-      # 17. APK imzalanmış mı doğrula
-      - name: Verify APK signature
-        run: |
-          APK=$(find mobile/android/app/build/outputs/apk/release -name "*.apk" | head -1)
-          echo "APK: $APK"
-          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner verify --verbose "$APK" || true
-
-      # 18. Debug outputs
-      - name: Debug outputs
-        run: |
-          ls -R mobile/android/app/build/outputs/
-
-      # 19. Upload artifacts
+      # 17. Upload artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
@@ -185,7 +156,7 @@ jobs:
             mobile/android/app/build/outputs/apk/release/*.apk
             mobile/android/app/build/outputs/bundle/release/*.aab
 
-      # 20. GitHub Release
+      # 18. GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
