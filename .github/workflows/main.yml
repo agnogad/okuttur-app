@@ -66,6 +66,15 @@ jobs:
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' \
             mobile/android/app/src/main/res/values/strings.xml
 
+      - name: Set StatusBar color (Android)
+        run: |
+          sed -i '/<resources>/a \
+            <color name="status_bar_color">#0f172a</color>' \
+            mobile/android/app/src/main/res/values/colors.xml
+
+          sed -i 's/<\/style>/    <item name="android:statusBarColor">@color\/status_bar_color<\/item>\n<\/style>/' \
+            mobile/android/app/src/main/res/values/styles.xml
+
       # 10. Assets (icon)
       - name: Prepare assets
         run: |
