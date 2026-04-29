@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 22
 
-      # 4. Build React
+      # 4. Build React (Vite → dist)
       - name: Install & Build React
         run: |
           cd app
@@ -39,7 +39,7 @@ jobs:
           mkdir mobile
           cd mobile
           npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/status-bar
           npx cap init okuttur com.okuttur.app --web-dir=www
 
       # 6. Copy dist
@@ -48,7 +48,7 @@ jobs:
           mkdir -p mobile/www
           cp -r app/dist/* mobile/www/
 
-      # 7. Add Android
+      # 7. Android add
       - name: Add Android
         run: |
           cd mobile
@@ -66,28 +66,36 @@ jobs:
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">Okuttur<\/string>/' \
             mobile/android/app/src/main/res/values/strings.xml
 
-      # 🔥 10. STATUS BAR FIX (YAML SAFE)
-      - name: Fix Status Bar Color
+      # 10. Status Bar Color
+      - name: Configure Status Bar Color
         run: |
-          VALUES_DIR=mobile/android/app/src/main/res/values
-          COLORS=$VALUES_DIR/colors.xml
-          STYLES=$VALUES_DIR/styles.xml
+          python3 - <<'PYEOF'
+          import re
 
-          mkdir -p $VALUES_DIR
+          path = "mobile/android/app/src/main/res/values/styles.xml"
+          with open(path, "r") as f:
+              content = f.read()
 
-          # colors.xml oluştur (her zaman overwrite)
-          cat <<EOF > $COLORS
-          <resources>
-          <color name="status_bar_color">#1c1b1f</color>
-          </resources>
-          EOF
+          color_items = (
+              '    <item name="android:statusBarColor">#1c1b1f</item>\n'
+              '    <item name="android:windowLightStatusBar">false</item>\n'
+          )
 
-          # styles.xml içine ekle (yoksa)
-          if ! grep -q "statusBarColor" $STYLES; then
-            sed -i '/<\/style>/i\    <item name="android:statusBarColor">@color/status_bar_color</item>' $STYLES
-          fi
+          if "statusBarColor" not in content:
+              content = re.sub(
+                  r'(<style name="AppTheme"[^>]*>)',
+                  r'\1\n' + color_items,
+                  content
+              )
 
-      # 11. Assets
+          with open(path, "w") as f:
+              f.write(content)
+
+          print("styles.xml patched:")
+          print(content)
+          PYEOF
+
+      # 11. Assets (icon)
       - name: Prepare assets
         run: |
           mkdir -p mobile/assets
@@ -100,7 +108,7 @@ jobs:
           npm install @capacitor/assets
           npx capacitor-assets generate
 
-      # 13. Java
+      # 13. Java 21
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -112,7 +120,7 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > mobile/android/app/release.keystore
 
-      # 15. Signing config
+      # 15. Inject Signing Config
       - name: Inject Signing Config
         run: |
           GRADLE=mobile/android/app/build.gradle
@@ -129,26 +137,61 @@ jobs:
 
           python3 - <<'PYEOF'
           import re
+
           path = "mobile/android/app/build.gradle"
-          with open(path) as f:
-              c = f.read()
-          if "signingConfig signingConfigs.release" not in c:
-              c = re.sub(r'(release\s*\{)', r'\1\n                signingConfig signingConfigs.release', c)
-          open(path,"w").write(c)
+          with open(path, "r") as f:
+              content = f.read()
+
+          if "signingConfig signingConfigs.release" not in content:
+              content = re.sub(
+                  r'(buildTypes\s*\{[^}]*release\s*\{)',
+                  r'\1\n                signingConfig signingConfigs.release',
+                  content,
+                  flags=re.DOTALL
+              )
+
+          with open(path, "w") as f:
+              f.write(content)
+
+          print("build.gradle patched successfully")
           PYEOF
 
-      # 16. Build
+          echo "=== Final build.gradle ==="
+          cat "$GRADLE"
+
+      # 16. Gradle cache
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*') }}
+
+      # 17. Build Release (Signed APK + AAB)
       - name: Build Release
         env:
+          MYAPP_RELEASE_STORE_FILE: app/release.keystore
           MYAPP_RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           MYAPP_RELEASE_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           MYAPP_RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd mobile/android
           chmod +x gradlew
-          ./gradlew assembleRelease bundleRelease
+          ./gradlew assembleRelease bundleRelease --stacktrace
 
-      # 17. Upload artifacts
+      # 18. Verify APK signature
+      - name: Verify APK signature
+        run: |
+          APK=$(find mobile/android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          echo "APK: $APK"
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/apksigner verify --verbose "$APK" || true
+
+      # 19. Debug outputs
+      - name: Debug outputs
+        run: |
+          ls -R mobile/android/app/build/outputs/
+
+      # 20. Upload artifacts
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
@@ -156,7 +199,7 @@ jobs:
             mobile/android/app/build/outputs/apk/release/*.apk
             mobile/android/app/build/outputs/bundle/release/*.aab
 
-      # 18. GitHub Release
+      # 21. GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
