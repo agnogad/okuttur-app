@@ -2,6 +2,8 @@
 
 **Okuttur**, favori web novel içeriklerinizi keşfetmeniz, organize etmeniz ve kesintisiz bir şekilde okumanız için geliştirilmiş modern bir web platformudur. Minimalist tasarımı ve kullanıcı dostu arayüzü ile okuma deneyiminizi bir üst seviyeye taşır.
 
+Webden Erişim: https://okuttur.web.app
+
 ## ✨ Özellikler
  * **Modern Arayüz:** Google'ın Material Design standartlarına uygun, temiz ve akıcı kullanıcı deneyimi.
  * **Geniş Arşiv:** Binlerce web novel içeriğine hızlı erişim ve kolay arama.
